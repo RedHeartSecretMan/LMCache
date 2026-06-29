@@ -1450,8 +1450,9 @@ class BlendV3Module(InstanceLivenessTarget):
                 ``old_st`` to new position ``cur_st``.
 
         Raises:
-            RuntimeError: On a compressed (compress_ratio != 1) or MLA
-                (kv_size != 2) layout, or a head_size/hidden_dim mismatch.
+            RuntimeError: On a compressed (compress_ratio != 1) layout, a
+                kv_size other than 2 (K/V) or 1 (key-only index), or a
+                head_size/hidden_dim mismatch.
         """
         if not slots_to_rope:
             return
@@ -1469,10 +1470,13 @@ class BlendV3Module(InstanceLivenessTarget):
                 gpu_context.get_temp_kernel_group_buffer(slot_idx, group_idx)
                 for slot_idx in range(batch_len)
             ]
-            if all_slots[0].shape[0] != 2:
+            # kv_size 2 = main K/V; kv_size 1 = M3 key-only index side cache.
+            # Either way only the K plane (tmp[0]) is re-RoPE'd below, so both
+            # are supported; reject anything else (compressed/true-MLA).
+            if all_slots[0].shape[0] not in (1, 2):
                 raise RuntimeError(
                     f"CB v3: group {group_idx} has kv_size={all_slots[0].shape[0]}; "
-                    "MLA layouts unsupported."
+                    "only K/V (2) and key-only (1) layouts are supported."
                 )
             num_layers, slots, hidden_dim = all_slots[0].shape[1:]
             n_heads = hidden_dim // rope_state.head_size
